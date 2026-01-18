@@ -78,7 +78,8 @@ async def process_auto_renewals(bot: Bot):
                     current_sub = await conn.fetchrow(
                         """SELECT auto_renew, expires_at, last_auto_renewal_at 
                            FROM subscriptions 
-                           WHERE telegram_id = $1""",
+                           WHERE telegram_id = $1
+                           FOR UPDATE SKIP LOCKED""",  # SKIP LOCKED allows parallel workers to skip locked rows
                         telegram_id
                     )
                     

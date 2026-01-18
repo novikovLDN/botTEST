@@ -95,7 +95,16 @@ async def get_pool() -> asyncpg.Pool:
     """Получить пул соединений, создав его при необходимости"""
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+        # Добавляем timeout параметры для лучшей надежности
+        _pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            command_timeout=30.0,  # Таймаут выполнения команд (30 секунд)
+            server_settings={
+                "application_name": "telegram_bot",
+            }
+        )
         logger.info("Database connection pool created")
     return _pool
 
@@ -313,11 +322,8 @@ async def init_db() -> bool:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_completed_sent BOOLEAN DEFAULT FALSE")
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS smart_offer_sent BOOLEAN DEFAULT FALSE")
         except Exception:
-            pass
-            # Если колонка уже существует как NUMERIC, конвертируем в INTEGER (копейки)
+            # Если колонка уже существует (в том числе как NUMERIC), игнорируем ошибку
             # Это безопасно, так как мы всегда работаем с копейками
-        except Exception:
-            # Колонка уже существует
             pass
         
         # Таблица balance_transactions

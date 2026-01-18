@@ -33,8 +33,9 @@ async def notify_admin_degraded_mode(bot: Bot):
         return
     
     try:
+        # Используем HTML форматирование вместо Markdown для лучшей совместимости
         message = (
-            "⚠️ **БОТ РАБОТАЕТ В ДЕГРАДИРОВАННОМ РЕЖИМЕ**\n\n"
+            "⚠️ <b>БОТ РАБОТАЕТ В ДЕГРАДИРОВАННОМ РЕЖИМЕ</b>\n\n"
             "База данных недоступна.\n\n"
             "• Бот запущен и отвечает на команды\n"
             "• Критические операции блокируются\n"
@@ -49,7 +50,7 @@ async def notify_admin_degraded_mode(bot: Bot):
         await bot.send_message(
             config.ADMIN_TELEGRAM_ID,
             message,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
         _degraded_notification_sent = True
@@ -76,8 +77,9 @@ async def notify_admin_recovered(bot: Bot):
         return
     
     try:
+        # Используем HTML форматирование вместо Markdown для лучшей совместимости
         message = (
-            "✅ **СЛУЖБА ВОССТАНОВЛЕНА**\n\n"
+            "✅ <b>СЛУЖБА ВОССТАНОВЛЕНА</b>\n\n"
             "База данных стала доступна.\n\n"
             "• Бот работает в полнофункциональном режиме\n"
             "• Все операции восстановлены\n"
@@ -87,7 +89,7 @@ async def notify_admin_recovered(bot: Bot):
         await bot.send_message(
             config.ADMIN_TELEGRAM_ID,
             message,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         
         _recovered_notification_sent = True

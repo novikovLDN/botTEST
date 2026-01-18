@@ -29,7 +29,21 @@ async def main():
     
     # Инициализация бота и диспетчера
     bot = Bot(token=config.BOT_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
+    
+    # Configure Storage (Redis or Memory)
+    if config.REDIS_URL:
+        try:
+            from aiogram.fsm.storage.redis import RedisStorage
+            storage = RedisStorage.from_url(config.REDIS_URL)
+            logger.info(f"Using Redis Storage at {config.REDIS_URL}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Redis storage: {e}. Falling back to MemoryStorage.")
+            storage = MemoryStorage()
+    else:
+        logger.warning("REDIS_URL not set. Using MemoryStorage (NOT RECOMMENDED for production).")
+        storage = MemoryStorage()
+        
+    dp = Dispatcher(storage=storage)
     
     # Регистрация handlers
     dp.include_router(handlers.router)

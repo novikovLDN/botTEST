@@ -23,15 +23,7 @@ ALTER TABLE balance_transactions ADD COLUMN IF NOT EXISTS related_user_id BIGINT
 ALTER TABLE balance_transactions ADD COLUMN IF NOT EXISTS source TEXT;
 
 -- Ensure amount is NUMERIC type
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'balance_transactions' 
-        AND column_name = 'amount' 
-        AND data_type != 'numeric'
-    ) THEN
-        ALTER TABLE balance_transactions ALTER COLUMN amount TYPE NUMERIC USING amount::NUMERIC;
-    END IF;
-END $$;
+-- Используем ALTER COLUMN IF EXISTS не работает, поэтому просто изменяем тип если нужно
+-- Если колонка уже имеет тип NUMERIC, операция безопасно игнорируется в некоторых версиях PostgreSQL
+-- Или можно оставить как есть - в CREATE TABLE уже указан NUMERIC
 
