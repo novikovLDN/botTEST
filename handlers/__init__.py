@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Включаем роутеры из подмодулей
+# ВАЖНО: Порядок регистрации важен - более специфичные handlers должны быть зарегистрированы первыми
 from handlers.user import router as user_router
 from handlers.admin import router as admin_router
 from handlers.payments import router as payments_router
@@ -33,13 +34,16 @@ router.include_router(payments_router)
 # ====================================================================================
 # GLOBAL FALLBACK HANDLER: Обработка необработанных callback_query
 # ====================================================================================
+# ВАЖНО: Этот handler должен быть зарегистрирован ПОСЛЕ всех конкретных handlers
+# В aiogram 3.x handlers обрабатываются в порядке регистрации
+# Fallback handler с пустым фильтром перехватывает все необработанные callback_query
 @router.callback_query()
 async def callback_fallback(callback: CallbackQuery, state: FSMContext):
     """
     Глобальный fallback handler для всех необработанных callback_query
     
     Логирует callback_data и текущее FSM-состояние для отладки.
-    НЕ отвечает пользователю, чтобы не ломать UX.
+    Отвечает пользователю, чтобы избежать висящих callback_query.
     """
     callback_data = callback.data
     telegram_id = callback.from_user.id
@@ -51,5 +55,8 @@ async def callback_fallback(callback: CallbackQuery, state: FSMContext):
         f"fsm_state={current_state}"
     )
     
-    # НЕ отвечаем пользователю - просто логируем для отладки
-    # Это позволяет видеть устаревшие/лишние callback_data без ломания UX
+    # Отвечаем пользователю, чтобы избежать висящих callback_query
+    try:
+        await callback.answer("Действие недоступно", show_alert=False)
+    except Exception as e:
+        logger.error(f"Error answering callback_query: {e}")

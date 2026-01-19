@@ -140,35 +140,82 @@ async def callback_change_language(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("lang_"))
 async def callback_language(callback: CallbackQuery):
-    """Обработчик выбора языка"""
+    """
+    Универсальный обработчик выбора языка
+    
+    Обрабатывает: lang_ru, lang_en, lang_uz, lang_tj
+    - Сохраняет язык в БД
+    - Обновляет сообщение с главным меню
+    - Вызывает callback.answer() для мгновенного отклика
+    """
+    # Отвечаем сразу для мгновенного отклика UI
+    await callback.answer()
+    
     if not await ensure_db_ready_callback(callback):
         return
     
-    language = callback.data.split("_")[1]
-    telegram_id = callback.from_user.id
-    
-    await database.update_user_language(telegram_id, language)
-    
-    text = localization.get_text(language, "home_welcome_text", default=localization.get_text(language, "welcome"))
-    text = await format_text_with_incident(text, language)
-    keyboard = await get_main_menu_keyboard(language, telegram_id)
-    await safe_edit_text(callback.message, text, reply_markup=keyboard)
-    await callback.answer()
+    try:
+        # Извлекаем язык из callback_data (lang_ru -> ru)
+        language = callback.data.split("_")[1]
+        telegram_id = callback.from_user.id
+        
+        # Сохраняем язык в БД
+        await database.update_user_language(telegram_id, language)
+        
+        # Формируем текст и клавиатуру главного меню
+        text = localization.get_text(language, "home_welcome_text", default=localization.get_text(language, "welcome"))
+        text = await format_text_with_incident(text, language)
+        keyboard = await get_main_menu_keyboard(language, telegram_id)
+        
+        # Обновляем сообщение
+        await safe_edit_text(callback.message, text, reply_markup=keyboard)
+        
+        logger.info(f"Language changed to {language} for user {telegram_id}")
+    except Exception as e:
+        logger.error(f"Error in callback_language: {e}", exc_info=True)
+        # Пытаемся показать ошибку пользователю
+        try:
+            await callback.answer("Ошибка при изменении языка", show_alert=True)
+        except:
+            pass
 
 @router.callback_query(F.data == "menu_main")
 async def callback_main_menu(callback: CallbackQuery):
-    """Главное меню"""
-    telegram_id = callback.from_user.id
-    language = "ru"
-    if database.DB_READY:
-        user = await database.get_user(telegram_id)
-        language = user.get("language", "ru") if user else "ru"
+    """
+    Обработчик главного меню
     
-    text = localization.get_text(language, "home_welcome_text", default=localization.get_text(language, "welcome"))
-    text = await format_text_with_incident(text, language)
-    keyboard = await get_main_menu_keyboard(language, callback.from_user.id)
-    await safe_edit_text(callback.message, text, reply_markup=keyboard)
+    - Загружает язык пользователя из БД
+    - Показывает главное меню с актуальным языком
+    - Вызывает callback.answer() для мгновенного отклика
+    """
+    # Отвечаем сразу для мгновенного отклика UI
     await callback.answer()
+    
+    try:
+        telegram_id = callback.from_user.id
+        language = "ru"
+        
+        # Загружаем язык пользователя из БД
+        if database.DB_READY:
+            user = await database.get_user(telegram_id)
+            language = user.get("language", "ru") if user else "ru"
+        
+        # Формируем текст и клавиатуру главного меню
+        text = localization.get_text(language, "home_welcome_text", default=localization.get_text(language, "welcome"))
+        text = await format_text_with_incident(text, language)
+        keyboard = await get_main_menu_keyboard(language, callback.from_user.id)
+        
+        # Обновляем сообщение
+        await safe_edit_text(callback.message, text, reply_markup=keyboard)
+        
+        logger.debug(f"Main menu shown for user {telegram_id} (language: {language})")
+    except Exception as e:
+        logger.error(f"Error in callback_main_menu: {e}", exc_info=True)
+        # Пытаемся показать ошибку пользователю
+        try:
+            await callback.answer("Ошибка при открытии меню", show_alert=True)
+        except:
+            pass
 
 @router.message(Command("profile"))
 async def cmd_profile(message: Message):
