@@ -1,5 +1,6 @@
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -203,6 +204,15 @@ async def callback_renewal_pay(callback: CallbackQuery):
             prices=prices
         )
         await callback.answer()
+    except TelegramBadRequest as e:
+        error_message = str(e).lower()
+        if "payment_provider_invalid" in error_message:
+            logger.error(f"PAYMENT_PROVIDER_INVALID in renewal payment: user={telegram_id}, tariff={tariff_key}")
+            error_text = localization.get_text(language, "error_payments_unavailable", default="Оплата картой временно недоступна")
+            await callback.answer(error_text, show_alert=True)
+        else:
+            logger.exception(f"TelegramBadRequest sending invoice for renewal: {e}")
+            await callback.answer(localization.get_text(language, "error_payment_create", default="Ошибка создания платежа"), show_alert=True)
     except Exception as e:
         logger.exception(f"Error sending invoice for renewal: {e}")
         user = await database.get_user(telegram_id)
@@ -1336,7 +1346,48 @@ async def callback_pay_card(callback: CallbackQuery, state: FSMContext):
         
         await callback.answer()
         
+    except TelegramBadRequest as e:
+        # Специфичная обработка ошибок Telegram Payments API
+        error_message = str(e).lower()
+        
+        if "payment_provider_invalid" in error_message:
+            # КРИТИЧНО: PAYMENT_PROVIDER_INVALID означает проблему с конфигурацией провайдера
+            # Отменяем pending_purchase, так как invoice не был создан
+            fsm_data = await state.get_data()
+            purchase_id = fsm_data.get("purchase_id")
+            if purchase_id:
+                try:
+                    await database.cancel_pending_purchases(telegram_id, "payment_provider_invalid")
+                    logger.info(f"Cancelled pending purchase due to PAYMENT_PROVIDER_INVALID: purchase_id={purchase_id}")
+                except Exception as cancel_error:
+                    logger.error(f"Error cancelling pending purchase: {cancel_error}")
+            
+            logger.error(
+                f"PAYMENT_PROVIDER_INVALID: user={telegram_id}, "
+                f"tariff={tariff_type}, period_days={period_days}, "
+                f"TG_PROVIDER_TOKEN configured={'Yes' if config.TG_PROVIDER_TOKEN else 'No'}"
+            )
+            error_text = localization.get_text(
+                language,
+                "error_payments_unavailable",
+                default="Оплата картой временно недоступна. Используйте баланс или криптовалюту."
+            )
+            await callback.answer(error_text, show_alert=True)
+            # Очищаем FSM state, так как покупка не была создана
+            await state.set_state(None)
+        else:
+            # Другие ошибки Telegram API
+            logger.exception(f"TelegramBadRequest creating invoice for card payment: {e}")
+            error_text = localization.get_text(
+                language,
+                "error_payment_create",
+                default="Ошибка создания платежа. Попробуйте ещё раз."
+            )
+            await callback.answer(error_text, show_alert=True)
+            # Очищаем FSM state при ошибке
+            await state.set_state(None)
     except Exception as e:
+        # Общие ошибки (не связанные с Telegram API)
         logger.exception(f"Error creating invoice for card payment: {e}")
         error_text = localization.get_text(
             language,
@@ -1344,6 +1395,8 @@ async def callback_pay_card(callback: CallbackQuery, state: FSMContext):
             default="Ошибка создания платежа. Попробуйте ещё раз."
         )
         await callback.answer(error_text, show_alert=True)
+        # Очищаем FSM state при ошибке
+        await state.set_state(None)
         await state.set_state(None)
 
 
@@ -1770,9 +1823,18 @@ async def callback_pay_tariff_card(callback: CallbackQuery, state: FSMContext):
             prices=prices
         )
         await callback.answer()
+    except TelegramBadRequest as e:
+        error_message = str(e).lower()
+        if "payment_provider_invalid" in error_message:
+            logger.error(f"PAYMENT_PROVIDER_INVALID in tariff card payment: user={telegram_id}, tariff={tariff_type}")
+            error_text = localization.get_text(language, "error_payments_unavailable", default="Оплата картой временно недоступна")
+            await callback.answer(error_text, show_alert=True)
+        else:
+            logger.exception(f"TelegramBadRequest sending invoice: {e}")
+            await callback.answer(localization.get_text(language, "error_payment_create", default="Ошибка создания платежа"), show_alert=True)
     except Exception as e:
         logger.exception(f"Error sending invoice: {e}")
-        await callback.answer(localization.get_text(language, "error_payment_create"), show_alert=True)
+        await callback.answer(localization.get_text(language, "error_payment_create", default="Ошибка создания платежа"), show_alert=True)
 
 
 @router.callback_query(F.data.startswith("topup_card:"))
@@ -1810,6 +1872,15 @@ async def callback_topup_card(callback: CallbackQuery):
             prices=[LabeledPrice(label=localization.get_text(language, "topup_invoice_label", default="Пополнение баланса"), amount=amount_kopecks)]
         )
         await callback.answer()
+    except TelegramBadRequest as e:
+        error_message = str(e).lower()
+        if "payment_provider_invalid" in error_message:
+            logger.error(f"PAYMENT_PROVIDER_INVALID in balance topup: user={telegram_id}, amount={amount}")
+            error_text = localization.get_text(language, "error_payments_unavailable", default="Оплата картой временно недоступна. Используйте баланс или криптовалюту.")
+            await callback.answer(error_text, show_alert=True)
+        else:
+            logger.exception(f"TelegramBadRequest sending invoice for topup: {e}")
+            await callback.answer(localization.get_text(language, "error_payment_create", default="Ошибка создания платежа"), show_alert=True)
     except Exception as e:
         logger.exception(f"Error sending invoice for balance topup: {e}")
         await callback.answer(
