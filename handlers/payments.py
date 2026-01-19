@@ -3225,40 +3225,14 @@ async def approve_payment(callback: CallbackQuery):
         await callback.answer("Ошибка. Проверь логи.", show_alert=True)
 
 
-# NOTE: Все admin обработчики перенесены в handlers/admin.py (выполнено)
-# Временная заглушка для совместимости - admin обработчики оставлены здесь
-# до полного разбиения на модули
-@router.callback_query(F.data == "admin:main")
-async def callback_admin_main(callback: CallbackQuery):
-    """Главный экран админ-дашборда"""
-    if callback.from_user.id != config.ADMIN_TELEGRAM_ID:
-        await callback.answer("Недостаточно прав доступа", show_alert=True)
-        return
-    
-    text = "🛠 Atlas Secure · Admin Dashboard\n\nВыберите действие:"
-    await safe_edit_text(callback.message, text, reply_markup=get_admin_dashboard_keyboard())
-    await callback.answer()
+# NOTE: Все admin обработчики перенесены в handlers/admin.py
+# Этот handler удалён, чтобы избежать дублирования
+# Используется handler из handlers/admin.py
 
 
-@router.callback_query(F.data == "admin_promo_stats")
-async def callback_admin_promo_stats(callback: CallbackQuery):
-    """Обработчик кнопки статистики промокодов в админ-дашборде"""
-    if callback.from_user.id != config.ADMIN_TELEGRAM_ID:
-        await callback.answer("Недостаточно прав доступа", show_alert=True)
-        return
-    
-    try:
-        # Получаем статистику промокодов
-        stats = await database.get_promo_stats()
-        
-        # Формируем текст ответа
-        text = await format_promo_stats_text(stats)
-        
-        await safe_edit_text(callback.message, text, reply_markup=get_admin_back_keyboard())
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Error getting promo stats: {e}")
-        await callback.answer("Ошибка при получении статистики промокодов.", show_alert=True)
+# NOTE: admin_promo_stats handler перенесён в handlers/admin.py
+# Этот handler удалён, чтобы избежать дублирования
+# Используется handler из handlers/admin.py
 
 
 @router.callback_query(F.data == "admin:metrics")

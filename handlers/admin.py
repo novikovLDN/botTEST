@@ -31,6 +31,7 @@ from states import (
     PromoCodeInput, TopUpStates
 )
 from utils.referral import send_referral_cashback_notification
+from utils.messages import safe_edit_text
 
 # Время запуска бота (для uptime)
 _bot_start_time = time.time()
@@ -128,20 +129,48 @@ async def cmd_admin(message: Message):
 
 @router.callback_query(F.data == "admin:main")
 async def callback_admin_main(callback: CallbackQuery):
-    """Главный экран админ-дашборда"""
+    """
+    Главный экран админ-дашборда
+    
+    - Проверяет права доступа
+    - Показывает админ-дашборд
+    - Вызывает callback.answer() для мгновенного отклика
+    """
+    # Отвечаем сразу для мгновенного отклика UI
+    await callback.answer()
+    
+    # Проверяем права доступа
     if callback.from_user.id != config.ADMIN_TELEGRAM_ID:
         await callback.answer("Недостаточно прав доступа", show_alert=True)
         return
     
-    text = "🛠 Atlas Secure · Admin Dashboard\n\nВыберите действие:"
-    await safe_edit_text(callback.message, text, reply_markup=get_admin_dashboard_keyboard())
-    await callback.answer()
+    try:
+        text = "🛠 Atlas Secure · Admin Dashboard\n\nВыберите действие:"
+        await safe_edit_text(callback.message, text, reply_markup=get_admin_dashboard_keyboard())
+        logger.debug(f"Admin dashboard shown for user {callback.from_user.id}")
+    except Exception as e:
+        logger.error(f"Error in callback_admin_main: {e}", exc_info=True)
+        try:
+            await callback.answer("Ошибка при открытии админ-панели", show_alert=True)
+        except:
+            pass
 
 
 @router.callback_query(F.data == "admin_promo_stats")
 async def callback_admin_promo_stats(callback: CallbackQuery):
-    """Обработчик кнопки статистики промокодов в админ-дашборде"""
+    """
+    Обработчик кнопки статистики промокодов в админ-дашборде
+    
+    - Проверяет права доступа
+    - Показывает статистику промокодов
+    - Вызывает callback.answer() для мгновенного отклика
+    """
+    # Отвечаем сразу для мгновенного отклика UI
+    await callback.answer()
+    
+    # Проверяем права доступа
     if callback.from_user.id != config.ADMIN_TELEGRAM_ID:
+        # Уже ответили выше, но показываем alert для ошибки доступа
         await callback.answer("Недостаточно прав доступа", show_alert=True)
         return
     
@@ -153,10 +182,13 @@ async def callback_admin_promo_stats(callback: CallbackQuery):
         text = await format_promo_stats_text(stats)
         
         await safe_edit_text(callback.message, text, reply_markup=get_admin_back_keyboard())
-        await callback.answer()
+        logger.debug(f"Admin promo stats shown for user {callback.from_user.id}")
     except Exception as e:
-        logger.error(f"Error getting promo stats: {e}")
-        await callback.answer("Ошибка при получении статистики промокодов.", show_alert=True)
+        logger.error(f"Error getting promo stats: {e}", exc_info=True)
+        try:
+            await callback.answer("Ошибка при получении статистики промокодов.", show_alert=True)
+        except:
+            pass
 
 
 @router.callback_query(F.data == "admin:metrics")
