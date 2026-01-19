@@ -79,7 +79,14 @@ async def main():
     dp = Dispatcher(storage=storage)
     
     # Регистрация handlers
+    # КРИТИЧНО: Router должен быть зарегистрирован ДО start_polling
+    # В aiogram 3.x handlers обрабатываются в порядке их регистрации
+    logger.info("📋 Registering handlers...")
     dp.include_router(handlers.router)
+    
+    # Логируем количество зарегистрированных handlers для диагностики
+    total_handlers = len(handlers.router.handlers)
+    logger.info(f"✅ Handlers registered: {total_handlers} total handlers in main router")
     
     # ====================================================================================
     # STEP 4: Connect Database and Run Migrations (FAIL-FAST)
@@ -109,11 +116,39 @@ async def main():
         logger.error(f"Database initialization error: {type(e).__name__}: {e}")
         database.DB_READY = False
         
-        # Уведомляем администратора о критической ошибке
+        # ====================================================================================
+        # SHUTDOWN SEQUENCE: Cleanup resources before exit
+        # ====================================================================================
+        logger.info("Cleaning up resources before shutdown...")
+        
+        # Закрываем пул соединений к БД (если был создан)
+        try:
+            await database.close_pool()
+            logger.info("Database connection pool closed")
+        except Exception as cleanup_error:
+            logger.error(f"Error closing database pool: {cleanup_error}")
+        
+        # Закрываем Redis клиент (если был создан)
+        try:
+            await redis_client.close_redis_client()
+            logger.info("Redis client closed")
+        except Exception as cleanup_error:
+            logger.error(f"Error closing Redis client: {cleanup_error}")
+        
+        # Закрываем Bot session (aiohttp ClientSession and TCPConnector)
+        try:
+            if bot.session:
+                # Закрываем aiohttp ClientSession (это также закроет все TCPConnector)
+                await bot.session.close()
+                logger.info("Bot session (aiohttp ClientSession) closed")
+        except Exception as cleanup_error:
+            logger.error(f"Error closing bot session: {cleanup_error}")
+        
+        # Уведомляем администратора о критической ошибке (после cleanup)
         try:
             await admin_notifications.notify_admin_degraded_mode(bot)
-        except Exception as e:
-            logger.error(f"Failed to send critical error notification: {e}")
+        except Exception as notify_error:
+            logger.error(f"Failed to send critical error notification: {notify_error}")
         
         # Завершаем процесс с ошибкой
         raise RuntimeError(f"Database initialization failed: {e}") from e
@@ -144,8 +179,8 @@ async def main():
     # Запускаем HTTP сервер для мониторинга и диагностики
     # Endpoint: GET /health - возвращает статус БД и приложения
     # ====================================================================================
-    health_server_host = os.getenv("HEALTH_SERVER_HOST", "0.0.0.0")
-    health_server_port = int(os.getenv("HEALTH_SERVER_PORT", "8080"))
+    health_server_host = config.HEALTH_SERVER_HOST
+    health_server_port = config.HEALTH_SERVER_PORT
     health_server_task = asyncio.create_task(
         health_server.health_server_task(host=health_server_host, port=health_server_port, bot=bot)
     )
@@ -218,10 +253,11 @@ async def main():
         await dp.start_polling(bot)
     finally:
         # ====================================================================================
-        # Cleanup: Отменяем все фоновые задачи
+        # SHUTDOWN SEQUENCE: Cleanup all resources
         # ====================================================================================
         logger.info("Shutting down...")
         
+        # Отменяем все фоновые задачи
         if reminder_task:
             reminder_task.cancel()
         if trial_notifications_task:
@@ -257,12 +293,27 @@ async def main():
                     pass
         
         # Закрываем пул соединений к БД
-        await database.close_pool()
-        logger.info("Database connection pool closed")
+        try:
+            await database.close_pool()
+            logger.info("Database connection pool closed")
+        except Exception as e:
+            logger.error(f"Error closing database pool: {e}")
         
         # Закрываем Redis клиент
-        await redis_client.close_redis_client()
-        logger.info("Redis client closed")
+        try:
+            await redis_client.close_redis_client()
+            logger.info("Redis client closed")
+        except Exception as e:
+            logger.error(f"Error closing Redis client: {e}")
+        
+        # Закрываем Bot session (aiohttp ClientSession and TCPConnector)
+        try:
+            if bot.session:
+                # Закрываем aiohttp ClientSession (это также закроет все TCPConnector)
+                await bot.session.close()
+                logger.info("Bot session (aiohttp ClientSession) closed")
+        except Exception as e:
+            logger.error(f"Error closing bot session: {e}")
 
 
 if __name__ == "__main__":

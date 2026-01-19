@@ -96,11 +96,9 @@ def safe_get(dictionary: Dict[str, Any], key: str, default: Any = None) -> Any:
         return default
     return dictionary.get(key, default)
 
-# Получаем DATABASE_URL из переменных окружения
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    print("ERROR: DATABASE_URL environment variable is not set!", file=sys.stderr)
-    sys.exit(1)
+# DATABASE_URL импортируется из config.py (централизованная конфигурация)
+# config.py гарантирует, что DATABASE_URL установлен перед импортом
+DATABASE_URL = config.DATABASE_URL
 
 # Глобальный пул соединений
 _pool: Optional[asyncpg.Pool] = None
