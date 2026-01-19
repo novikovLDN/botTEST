@@ -78,12 +78,49 @@ async def main():
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher(storage=storage)
     
-    # Регистрация handlers
-    # КРИТИЧНО: Router должен быть зарегистрирован ДО start_polling
-    # В aiogram 3.x handlers обрабатываются в порядке их регистрации
+    # ====================================================================================
+    # STEP 3.5: Register Handlers (CRITICAL ORDER)
+    # ====================================================================================
+    # КРИТИЧНО: В aiogram 3.x порядок регистрации handlers определяет порядок их обработки
+    # Более специфичные handlers должны быть зарегистрированы ПЕРВЫМИ
+    # 
+    # ВАЖНО: Регистрируем handlers напрямую на Dispatcher в правильном порядке:
+    # 1. Сначала конкретные handlers из подроутеров (user, admin, payments)
+    # 2. Затем fallback handler (только для необработанных callback_query)
+    # 
+    # В aiogram 3.x handlers обрабатываются в порядке регистрации:
+    # - Первый зарегистрированный router проверяется первым
+    # - Если handler не матчится, проверяется следующий router
+    # - Fallback handler должен быть последним, чтобы ловить только необработанные
     logger.info("📋 Registering handlers...")
-    dp.include_router(handlers.router)
-    logger.info("✅ Handlers registered successfully")
+    
+    # Импортируем роутеры (handlers регистрируются в момент импорта через декораторы)
+    from handlers.user import router as user_router
+    from handlers.admin import router as admin_router
+    from handlers.payments import router as payments_router
+    from handlers import router as fallback_router
+    
+    # КРИТИЧНО: Порядок регистрации определяет порядок обработки
+    # Регистрируем в порядке от наиболее специфичных к наименее специфичным
+    
+    # 1. User handlers (lang_*, menu_main, menu_profile, etc.)
+    dp.include_router(user_router)
+    logger.info("✅ User router registered")
+    
+    # 2. Admin handlers (admin:*, admin_promo_stats, etc.)
+    dp.include_router(admin_router)
+    logger.info("✅ Admin router registered")
+    
+    # 3. Payment handlers (pay:*, topup_*, tariff:*, etc.)
+    dp.include_router(payments_router)
+    logger.info("✅ Payments router registered")
+    
+    # 4. Fallback handler (только для необработанных callback_query)
+    # ДОЛЖЕН быть зарегистрирован ПОСЛЕДНИМ
+    dp.include_router(fallback_router)
+    logger.info("✅ Fallback router registered (LAST)")
+    
+    logger.info("✅ All handlers registered successfully in correct order")
     
     # ====================================================================================
     # STEP 4: Connect Database and Run Migrations (FAIL-FAST)
