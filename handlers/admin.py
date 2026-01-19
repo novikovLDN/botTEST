@@ -37,6 +37,9 @@ from utils.messages import safe_edit_text
 _bot_start_time = time.time()
 router = Router()
 
+# Инициализация logger
+logger = logging.getLogger(__name__)
+
 
 
 
