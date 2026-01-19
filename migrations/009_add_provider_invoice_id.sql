@@ -3,13 +3,5 @@
 -- NULL for non-cryptobot purchases, TEXT for cryptobot invoice IDs
 
 -- Add column if it doesn't exist (idempotent)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'pending_purchases' 
-        AND column_name = 'provider_invoice_id'
-    ) THEN
-        ALTER TABLE pending_purchases ADD COLUMN provider_invoice_id TEXT;
-    END IF;
-END $$;
+-- Используем ALTER TABLE ADD COLUMN IF NOT EXISTS вместо DO $$ блока
+ALTER TABLE pending_purchases ADD COLUMN IF NOT EXISTS provider_invoice_id TEXT;

@@ -81,6 +81,12 @@ async def perform_health_check() -> Tuple[bool, list]:
     messages = []
     all_ok = True
     
+    # Проверка статуса инициализации БД (критично!)
+    if database.DB_INIT_STATUS != database.DBInitStatus.READY:
+        db_init_msg = f"DB INIT STATUS: {database.DB_INIT_STATUS.value} (требуется READY)"
+        messages.append(db_init_msg)
+        all_ok = False
+    
     # Проверка PostgreSQL
     db_ok, db_msg = await check_database_connection()
     messages.append(db_msg)

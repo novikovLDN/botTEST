@@ -6,6 +6,7 @@ import base64
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple, TYPE_CHECKING, List
+from enum import Enum
 import logging
 import config
 import vpn_utils
@@ -23,6 +24,20 @@ logger = logging.getLogger(__name__)
 # Если False, бот работает в деградированном режиме (degraded mode).
 # ====================================================================================
 DB_READY: bool = False
+
+# ====================================================================================
+# DB INIT STATUS: Статус инициализации базы данных
+# ====================================================================================
+# READY - миграции применены успешно, БД готова к работе
+# PENDING - инициализация в процессе
+# FAILED - ошибка при применении миграций
+# ====================================================================================
+class DBInitStatus(str, Enum):
+    PENDING = "PENDING"
+    READY = "READY"
+    FAILED = "FAILED"
+
+DB_INIT_STATUS: DBInitStatus = DBInitStatus.PENDING
 
 
 # ====================================================================================
@@ -111,11 +126,12 @@ async def get_pool() -> asyncpg.Pool:
 
 async def close_pool():
     """Закрыть пул соединений"""
-    global _pool, DB_READY
+    global _pool, DB_READY, DB_INIT_STATUS
     if _pool:
         await _pool.close()
         _pool = None
         DB_READY = False  # Помечаем БД как недоступную при закрытии пула
+        DB_INIT_STATUS = DBInitStatus.PENDING  # Сбрасываем статус при закрытии пула
         logger.info("Database connection pool closed")
 
 
@@ -146,7 +162,8 @@ async def init_db() -> bool:
     Raises:
         Любые исключения пробрасываются наверх для обработки в startup guard
     """
-    global DB_READY
+    global DB_READY, DB_INIT_STATUS
+    DB_INIT_STATUS = DBInitStatus.PENDING
     pool = await get_pool()
     
     # ====================================================================================
@@ -157,10 +174,12 @@ async def init_db() -> bool:
         migrations_success = await migrations.run_migrations_safe(pool)
         if not migrations_success:
             logger.error("Failed to apply database migrations")
+            DB_INIT_STATUS = DBInitStatus.FAILED
             return False
         logger.info("Database migrations applied successfully")
     except Exception as e:
         logger.exception(f"Error applying migrations: {e}")
+        DB_INIT_STATUS = DBInitStatus.FAILED
         return False
     
     async with pool.acquire() as conn:
@@ -607,6 +626,7 @@ async def init_db() -> bool:
         logger.info("Database tables initialized")
     # Успешная инициализация
     DB_READY = True
+    DB_INIT_STATUS = DBInitStatus.READY
     return True
 
 

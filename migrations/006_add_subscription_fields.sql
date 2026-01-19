@@ -7,6 +7,7 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'payment';
 
 -- Make vpn_key nullable (for Xray Core migration)
+-- Используем DO $$ блок для идемпотентности
 DO $$
 BEGIN
     IF EXISTS (

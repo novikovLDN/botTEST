@@ -81,5 +81,9 @@ CRYPTOBOT_API_URL = os.getenv("CRYPTOBOT_API_URL", "https://pay.crypt.bot/api")
 CRYPTOBOT_WEBHOOK_SECRET = os.getenv("CRYPTOBOT_WEBHOOK_SECRET", "")
 
 
-# Redis Configuration
+# Redis Configuration (REQUIRED)
 REDIS_URL = os.getenv("REDIS_URL")
+if not REDIS_URL:
+    print("ERROR: REDIS_URL environment variable is not set!", file=sys.stderr)
+    print("ERROR: Redis is required for production deployment (FSM state storage)", file=sys.stderr)
+    sys.exit(1)

@@ -30,41 +30,51 @@ async def health_handler(request: web.Request) -> web.Response:
         }
     
     Status rules:
-        - "ok" if DB_READY == True
-        - "degraded" if DB_READY == False
+        - "ok" if DB_INIT_STATUS == READY and DB_READY == True
+        - "degraded" if DB_INIT_STATUS != READY or DB_READY == False
     
     IMPORTANT: This endpoint MUST NOT depend on database.
-    It only reads the global DB_READY flag.
+    It only reads the global DB_READY and DB_INIT_STATUS flags.
     """
     try:
-        # Читаем глобальный флаг (не обращаемся к БД)
+        # Читаем глобальные флаги (не обращаемся к БД)
         db_ready = database.DB_READY
+        db_init_status = database.DB_INIT_STATUS
         
-        # Определяем статус
-        status = "ok" if db_ready else "degraded"
+        # Определяем статус: FAIL если миграции не применены
+        if db_init_status != database.DBInitStatus.READY:
+            status = "fail"
+            http_status = 503  # Service Unavailable
+        elif db_ready:
+            status = "ok"
+            http_status = 200
+        else:
+            status = "degraded"
+            http_status = 200
         
         # Формируем ответ
         response_data: Dict[str, Any] = {
             "status": status,
             "db_ready": db_ready,
+            "db_init_status": db_init_status.value,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
-        # HTTP статус код: 200 для обоих случаев (ok и degraded)
-        # Мониторинг может различать по полю "status"
-        return web.json_response(response_data, status=200)
+        # HTTP статус код: 503 если миграции не применены, иначе 200
+        return web.json_response(response_data, status=http_status)
         
     except Exception as e:
         # Критическая ошибка - логируем, но всё равно отвечаем
         logger.exception(f"Error in health endpoint: {e}")
-        # Возвращаем degraded статус при ошибке
+        # Возвращаем fail статус при ошибке
         response_data = {
-            "status": "degraded",
+            "status": "fail",
             "db_ready": False,
+            "db_init_status": "UNKNOWN",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "error": "Health check error"
         }
-        return web.json_response(response_data, status=200)
+        return web.json_response(response_data, status=503)
 
 
 async def create_health_app(bot: Optional[Bot] = None) -> web.Application:

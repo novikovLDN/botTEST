@@ -103,23 +103,43 @@ async def apply_migration(conn: asyncpg.Connection, version: str, migration_path
         # asyncpg.execute может выполнить только одну команду за раз
         # Разделяем SQL на отдельные команды по точке с запятой
         
-        # Простой парсер SQL команд (разделение по ; вне строк)
+        # Парсер SQL команд с поддержкой dollar-quoted строк (DO $$ ... $$)
         commands = []
         current_command = []
         in_single_quote = False
         in_double_quote = False
         in_dollar_quote = False
         dollar_tag = None
+        i = 0
         
-        for char in sql_content:
+        while i < len(sql_content):
+            char = sql_content[i]
             current_command.append(char)
             
             if not in_single_quote and not in_double_quote and not in_dollar_quote:
-                # Проверяем начало dollar-quoted строки ($tag$)
+                # Проверяем начало dollar-quoted строки ($tag$ или $$)
                 if char == '$':
-                    # Простая проверка: если следующий символ не пробел, это может быть dollar quote
-                    # Для упрощения считаем, что dollar quotes не используются в миграциях
-                    pass
+                    # Проверяем следующий символ
+                    if i + 1 < len(sql_content):
+                        next_char = sql_content[i + 1]
+                        if next_char == '$':
+                            # Это $$ (безымянный dollar quote)
+                            in_dollar_quote = True
+                            dollar_tag = ''
+                            i += 1
+                            current_command.append('$')
+                        elif next_char.isalnum() or next_char == '_':
+                            # Это $tag$ - начинаем собирать тег
+                            tag_start = i + 1
+                            tag_end = tag_start
+                            while tag_end < len(sql_content) and (sql_content[tag_end].isalnum() or sql_content[tag_end] == '_'):
+                                tag_end += 1
+                            if tag_end < len(sql_content) and sql_content[tag_end] == '$':
+                                # Нашли закрывающий $ для тега
+                                dollar_tag = sql_content[tag_start:tag_end]
+                                in_dollar_quote = True
+                                current_command.extend(sql_content[tag_start:tag_end + 1])
+                                i = tag_end
                 elif char == "'":
                     in_single_quote = True
                 elif char == '"':
@@ -131,15 +151,45 @@ async def apply_migration(conn: asyncpg.Connection, version: str, migration_path
                         commands.append(command_text)
                     current_command = []
             else:
-                if in_single_quote and char == "'":
+                if in_dollar_quote:
+                    # Проверяем закрытие dollar quote
+                    if char == '$':
+                        if dollar_tag == '':
+                            # Безымянный $$ - проверяем следующий символ
+                            if i + 1 < len(sql_content) and sql_content[i + 1] == '$':
+                                # Закрывающий $$
+                                in_dollar_quote = False
+                                dollar_tag = None
+                                i += 1
+                                current_command.append('$')
+                        else:
+                            # Именованный $tag$ - проверяем, совпадает ли тег
+                            if i + len(dollar_tag) + 1 < len(sql_content):
+                                potential_tag = sql_content[i + 1:i + 1 + len(dollar_tag)]
+                                if potential_tag == dollar_tag and sql_content[i + 1 + len(dollar_tag)] == '$':
+                                    # Закрывающий $tag$
+                                    in_dollar_quote = False
+                                    current_command.extend(dollar_tag + '$')
+                                    i += len(dollar_tag) + 1
+                                    dollar_tag = None
+                                    continue
+                elif in_single_quote and char == "'":
                     # Проверяем экранированную кавычку
-                    if len(current_command) > 1 and current_command[-2] == "'":
-                        continue  # Двойная кавычка - экранирование
+                    if i + 1 < len(sql_content) and sql_content[i + 1] == "'":
+                        # Двойная кавычка - экранирование, пропускаем
+                        i += 1
+                        current_command.append("'")
+                        continue
                     in_single_quote = False
                 elif in_double_quote and char == '"':
-                    if len(current_command) > 1 and current_command[-2] == '"':
-                        continue  # Двойная кавычка - экранирование
+                    if i + 1 < len(sql_content) and sql_content[i + 1] == '"':
+                        # Двойная кавычка - экранирование, пропускаем
+                        i += 1
+                        current_command.append('"')
+                        continue
                     in_double_quote = False
+            
+            i += 1
         
         # Если осталась незавершённая команда
         if current_command:

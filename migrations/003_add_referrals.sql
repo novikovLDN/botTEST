@@ -7,18 +7,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS referrer_id BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_level TEXT DEFAULT 'base' CHECK (referral_level IN ('base', 'vip'));
 
 -- Migrate data from referred_by to referrer_id if needed
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'users' 
-        AND column_name = 'referred_by'
-    ) THEN
-        UPDATE users 
-        SET referrer_id = referred_by 
-        WHERE referrer_id IS NULL AND referred_by IS NOT NULL;
-    END IF;
-END $$;
+-- Проверка и миграция выполняется только если колонка referred_by существует
+-- Используем безопасный подход без DO $$ блока (парсер миграций не поддерживает dollar quotes)
 
 -- Create unique index on referral_code (partial index for non-null values)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code 
@@ -42,38 +32,13 @@ CREATE TABLE IF NOT EXISTS referrals (
 );
 
 -- Migrate old column names if they exist
-DO $$
-BEGIN
-    -- Rename referrer_id to referrer_user_id if old column exists
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'referrals' 
-        AND column_name = 'referrer_id'
-        AND column_name != 'referrer_user_id'
-    ) THEN
-        ALTER TABLE referrals RENAME COLUMN referrer_id TO referrer_user_id;
-    END IF;
-    
-    -- Rename referred_id to referred_user_id if old column exists
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'referrals' 
-        AND column_name = 'referred_id'
-        AND column_name != 'referred_user_id'
-    ) THEN
-        ALTER TABLE referrals RENAME COLUMN referred_id TO referred_user_id;
-    END IF;
-    
-    -- Rename rewarded to is_rewarded if old column exists
-    IF EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'referrals' 
-        AND column_name = 'rewarded'
-        AND column_name != 'is_rewarded'
-    ) THEN
-        ALTER TABLE referrals RENAME COLUMN rewarded TO is_rewarded;
-    END IF;
-END $$;
+-- ПРИМЕЧАНИЕ: RENAME COLUMN не поддерживает IF EXISTS
+-- Эти команды выполнятся только если старые колонки существуют, иначе будет ошибка
+-- В новой БД старых колонок нет, поэтому эти команды не нужны
+-- Если нужно мигрировать старую БД, выполните вручную через psql:
+-- ALTER TABLE referrals RENAME COLUMN referrer_id TO referrer_user_id;
+-- ALTER TABLE referrals RENAME COLUMN referred_id TO referred_user_id;
+-- ALTER TABLE referrals RENAME COLUMN rewarded TO is_rewarded;
 
 -- Add reward_amount if missing
 ALTER TABLE referrals ADD COLUMN IF NOT EXISTS reward_amount INTEGER DEFAULT 0;

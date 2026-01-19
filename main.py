@@ -260,6 +260,25 @@ async def main():
         logger.warning("Crypto payment watcher task skipped (DB not ready)")
     
     # Запуск бота
+    # ====================================================================================
+    # FAIL-FAST GUARD: Запрещаем запуск polling, если миграции не применены
+    # ====================================================================================
+    if database.DB_INIT_STATUS != database.DBInitStatus.READY:
+        error_msg = (
+            f"❌ CRITICAL: Cannot start bot polling - DB migrations not applied!\n"
+            f"DB_INIT_STATUS: {database.DB_INIT_STATUS.value}\n"
+            f"Expected: READY\n"
+            f"Bot will NOT start in degraded mode - this is a critical error."
+        )
+        logger.error(error_msg)
+        # Уведомляем администратора о критической ошибке
+        try:
+            await admin_notifications.notify_admin_degraded_mode(bot)
+        except Exception as e:
+            logger.error(f"Failed to send critical error notification: {e}")
+        # Завершаем процесс с ошибкой
+        raise RuntimeError(f"Database migrations not applied: {database.DB_INIT_STATUS.value}")
+    
     if database.DB_READY:
         logger.info("✅ Бот запущен в полнофункциональном режиме")
     else:
