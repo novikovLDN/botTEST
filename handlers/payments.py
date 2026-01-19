@@ -1,5 +1,5 @@
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
+from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -19,6 +19,9 @@ from keyboards.payments import (
     get_sbp_payment_keyboard, get_pending_payment_keyboard,
     get_vpn_key_keyboard
 )
+from keyboards.user import (
+    get_about_keyboard, get_support_keyboard, get_instruction_keyboard, get_service_status_keyboard
+)
 from keyboards.admin import (
     get_admin_dashboard_keyboard, get_admin_back_keyboard
 )
@@ -28,6 +31,7 @@ from utils.messages import (
     ensure_db_ready_message,
     ensure_db_ready_callback
 )
+from utils.platform import detect_platform
 
 # Время запуска бота (для uptime) - используется в admin обработчиках
 _bot_start_time = time.time()

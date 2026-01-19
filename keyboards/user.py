@@ -140,6 +140,16 @@ def get_back_keyboard(language: str):
         )]
     ])
 
+def get_service_status_keyboard(language: str):
+    """Клавиатура раздела 'Статус сервиса'"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=localization.get_text(language, "back", default="⬅️ Назад"),
+            callback_data="menu_main"
+        )]
+    ])
+    return keyboard
+
 def get_support_keyboard(language: str):
     """Клавиатура раздела 'Поддержка'"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
