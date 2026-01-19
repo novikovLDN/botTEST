@@ -130,6 +130,17 @@ async def callback_renewal_pay(callback: CallbackQuery):
     user = await database.get_user(telegram_id)
     language = user.get("language", "ru") if user else "ru"
     
+    # КРИТИЧНО: Проверяем feature flag для оплаты картой
+    if not config.PAYMENTS_CARD_ENABLED:
+        logger.info(f"Card payments disabled by config: user={telegram_id}, renewal")
+        error_text = localization.get_text(
+            language,
+            "error_payments_unavailable",
+            default="Оплата картой временно недоступна. Используйте баланс или криптовалюту."
+        )
+        await callback.answer(error_text, show_alert=True)
+        return
+    
     # Проверяем наличие provider_token
     if not config.TG_PROVIDER_TOKEN:
         user = await database.get_user(telegram_id)
@@ -292,20 +303,29 @@ async def callback_topup_amount(callback: CallbackQuery):
         default=f"Пополнение баланса на {amount} ₽\n\nВыберите способ оплаты:"
     )
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
+    # Формируем кнопки пополнения баланса
+    topup_buttons = []
+    
+    # Кнопка оплаты картой (показываем только если включена)
+    if config.PAYMENTS_CARD_ENABLED:
+        topup_buttons.append([InlineKeyboardButton(
             text=localization.get_text(language, "pay_with_card", default="💳 Оплатить картой"),
             callback_data=f"topup_card:{amount}"
-        )],
-        [InlineKeyboardButton(
-            text=localization.get_text(language, "pay_crypto", default="🌏 Криптовалюта"),
-            callback_data=f"topup_crypto:{amount}"
-        )],
-        [InlineKeyboardButton(
-            text=localization.get_text(language, "back", default="← Назад"),
-            callback_data="topup_balance"
-        )],
-    ])
+        )])
+    
+    # Кнопка оплаты криптовалютой
+    topup_buttons.append([InlineKeyboardButton(
+        text=localization.get_text(language, "pay_crypto", default="🌏 Криптовалюта"),
+        callback_data=f"topup_crypto:{amount}"
+    )])
+    
+    # Кнопка "Назад"
+    topup_buttons.append([InlineKeyboardButton(
+        text=localization.get_text(language, "back", default="← Назад"),
+        callback_data="topup_balance"
+    )])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=topup_buttons)
     
     await safe_edit_text(callback.message, text, reply_markup=keyboard)
     await callback.answer()
@@ -392,20 +412,29 @@ async def process_topup_amount(message: Message, state: FSMContext):
         default=f"Пополнение баланса на {amount} ₽\n\nВыберите способ оплаты:"
     )
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
+    # Формируем кнопки пополнения баланса
+    topup_buttons = []
+    
+    # Кнопка оплаты картой (показываем только если включена)
+    if config.PAYMENTS_CARD_ENABLED:
+        topup_buttons.append([InlineKeyboardButton(
             text=localization.get_text(language, "pay_with_card", default="💳 Оплатить картой"),
             callback_data=f"topup_card:{amount}"
-        )],
-        [InlineKeyboardButton(
-            text=localization.get_text(language, "pay_crypto", default="🌏 Криптовалюта"),
-            callback_data=f"topup_crypto:{amount}"
-        )],
-        [InlineKeyboardButton(
-            text=localization.get_text(language, "back", default="← Назад"),
-            callback_data="topup_balance"
-        )],
-    ])
+        )])
+    
+    # Кнопка оплаты криптовалютой
+    topup_buttons.append([InlineKeyboardButton(
+        text=localization.get_text(language, "pay_crypto", default="🌏 Криптовалюта"),
+        callback_data=f"topup_crypto:{amount}"
+    )])
+    
+    # Кнопка "Назад"
+    topup_buttons.append([InlineKeyboardButton(
+        text=localization.get_text(language, "back", default="← Назад"),
+        callback_data="topup_balance"
+    )])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=topup_buttons)
     
     await message.answer(text, reply_markup=keyboard)
 
@@ -875,11 +904,12 @@ async def show_payment_method_selection(
         callback_data="pay:balance"
     )])
     
-    # Кнопка оплаты картой
-    buttons.append([InlineKeyboardButton(
-        text=localization.get_text(language, "pay_card", default="💳 Банковская карта"),
-        callback_data="pay:card"
-    )])
+    # Кнопка оплаты картой (показываем только если включена)
+    if config.PAYMENTS_CARD_ENABLED:
+        buttons.append([InlineKeyboardButton(
+            text=localization.get_text(language, "pay_card", default="💳 Банковская карта"),
+            callback_data="pay:card"
+        )])
     
     # Кнопка оплаты криптовалютой (CryptoBot)
     buttons.append([InlineKeyboardButton(
@@ -1270,6 +1300,17 @@ async def callback_pay_card(callback: CallbackQuery, state: FSMContext):
         await callback.answer(error_text, show_alert=True)
         logger.error(f"Missing purchase data in FSM: user={telegram_id}, tariff={tariff_type}, period={period_days}, price={final_price_kopecks}")
         await state.set_state(None)
+        return
+    
+    # КРИТИЧНО: Проверяем feature flag для оплаты картой
+    if not config.PAYMENTS_CARD_ENABLED:
+        logger.info(f"Card payments disabled by config: user={telegram_id}")
+        error_text = localization.get_text(
+            language,
+            "error_payments_unavailable",
+            default="Оплата картой временно недоступна. Используйте баланс или криптовалюту."
+        )
+        await callback.answer(error_text, show_alert=True)
         return
     
     # Проверяем наличие provider_token
@@ -1699,6 +1740,17 @@ async def callback_pay_tariff_card(callback: CallbackQuery, state: FSMContext):
     user = await database.get_user(telegram_id)
     language = user.get("language", "ru") if user else "ru"
     
+    # КРИТИЧНО: Проверяем feature flag для оплаты картой
+    if not config.PAYMENTS_CARD_ENABLED:
+        logger.info(f"Card payments disabled by config: user={telegram_id}, pay_tariff_card")
+        error_text = localization.get_text(
+            language,
+            "error_payments_unavailable",
+            default="Оплата картой временно недоступна. Используйте баланс или криптовалюту."
+        )
+        await callback.answer(error_text, show_alert=True)
+        return
+    
     # КРИТИЧНО: Получаем данные из FSM state (единственный источник правды)
     fsm_data = await state.get_data()
     purchase_id = fsm_data.get("purchase_id")
@@ -1843,6 +1895,17 @@ async def callback_topup_card(callback: CallbackQuery):
     telegram_id = callback.from_user.id
     user = await database.get_user(telegram_id)
     language = user.get("language", "ru") if user else "ru"
+    
+    # КРИТИЧНО: Проверяем feature flag для оплаты картой
+    if not config.PAYMENTS_CARD_ENABLED:
+        logger.info(f"Card payments disabled by config: user={telegram_id}, topup_card")
+        error_text = localization.get_text(
+            language,
+            "error_payments_unavailable",
+            default="Оплата картой временно недоступна. Используйте баланс или криптовалюту."
+        )
+        await callback.answer(error_text, show_alert=True)
+        return
     
     amount_str = callback.data.split(":")[1]
     try:

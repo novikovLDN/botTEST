@@ -84,6 +84,11 @@ SUPPORT_TELEGRAM: str = os.getenv("SUPPORT_TELEGRAM", "@support")
 # Telegram Payments Configuration
 TG_PROVIDER_TOKEN: str = os.getenv("TG_PROVIDER_TOKEN", "")
 
+# Card Payments Feature Flag
+# Set to "false" to disable card payments when PAYMENT_PROVIDER_INVALID occurs
+# This prevents creating unnecessary pending purchases and hitting Telegram API
+PAYMENTS_CARD_ENABLED: bool = os.getenv("PAYMENTS_CARD_ENABLED", "true").lower() in ("true", "1", "yes")
+
 # Xray Core API Configuration (OPTIONAL)
 XRAY_API_URL: str = os.getenv("XRAY_API_URL", "")
 XRAY_API_KEY: str = os.getenv("XRAY_API_KEY", "")
