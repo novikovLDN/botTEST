@@ -1,59 +1,23 @@
 """
-Handlers module - объединение всех роутеров обработчиков.
-
-Этот модуль служит точкой входа для всех обработчиков бота.
-Он объединяет роутеры из подмодулей:
-- handlers.user - пользовательские обработчики
-- handlers.admin - административные обработчики
-- handlers.payments - обработчики платежей
-
-Все обработчики должны находиться в соответствующих подмодулях, а не в этом файле.
+Handlers module - Fallback handler для необработанных callback_query.
 
 КРИТИЧНО: В aiogram 3.x порядок регистрации handlers критически важен.
-Handlers обрабатываются в порядке их регистрации в каждом роутере.
-При include_router handlers из подроутера добавляются в конец списка handlers основного роутера.
+Handlers обрабатываются в порядке их регистрации.
+
+ВАЖНО: Этот модуль содержит ТОЛЬКО fallback handler.
+Конкретные handlers регистрируются напрямую на Dispatcher в main.py
+для гарантии правильного порядка обработки.
 """
 
 import logging
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 logger = logging.getLogger(__name__)
 
-# Создаем основной роутер
+# Создаем роутер ТОЛЬКО для fallback handler
 router = Router()
-
-# КРИТИЧНО: Импортируем роутеры ДО их регистрации
-# Это гарантирует, что все handlers из подроутеров будут зарегистрированы
-from handlers.user import router as user_router
-from handlers.admin import router as admin_router
-from handlers.payments import router as payments_router
-
-# Регистрируем подроутеры в правильном порядке
-# КРИТИЧНО: В aiogram 3.x порядок регистрации handlers определяет порядок их обработки
-# Более специфичные handlers должны быть зарегистрированы ПЕРВЫМИ
-# 
-# В aiogram 3.x при include_router:
-# 1. Handlers из подроутера добавляются в конец списка handlers основного роутера
-# 2. Порядок обработки: handlers из первого include_router → handlers из второго → ...
-# 3. Fallback handler ДОЛЖЕН быть зарегистрирован ПОСЛЕ всех include_router
-# 
-# ВАЖНО: Порядок регистрации критически важен для правильной работы фильтров
-# Если fallback handler регистрируется ДО конкретных handlers, он перехватит все callback_query
-router.include_router(user_router)
-router.include_router(admin_router)
-router.include_router(payments_router)
-
-# КРИТИЧНО: В aiogram 3.x Router НЕ имеет публичного атрибута .handlers
-# Любая попытка обращения к .handlers вызывает AttributeError
-# Это чисто отладочный код, который НЕ должен быть в production
-# Логируем успешную регистрацию роутеров без интроспекции
-logger.info(
-    "Routers initialized successfully: "
-    "user_router, admin_router, payments_router "
-    "(aiogram 3.x, handlers registered via decorators)"
-)
 
 
 # ====================================================================================
