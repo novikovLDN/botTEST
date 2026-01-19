@@ -42,12 +42,14 @@ router.include_router(user_router)
 router.include_router(admin_router)
 router.include_router(payments_router)
 
-# Логируем количество зарегистрированных handlers для диагностики
+# КРИТИЧНО: В aiogram 3.x Router НЕ имеет публичного атрибута .handlers
+# Любая попытка обращения к .handlers вызывает AttributeError
+# Это чисто отладочный код, который НЕ должен быть в production
+# Логируем успешную регистрацию роутеров без интроспекции
 logger.info(
-    f"Routers registered: "
-    f"user={len(user_router.handlers)} handlers, "
-    f"admin={len(admin_router.handlers)} handlers, "
-    f"payments={len(payments_router.handlers)} handlers"
+    "Routers initialized successfully: "
+    "user_router, admin_router, payments_router "
+    "(aiogram 3.x, handlers registered via decorators)"
 )
 
 
