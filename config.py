@@ -1,92 +1,174 @@
+"""
+Configuration Module - Enterprise Standard
+
+All environment variables are declared at the top of the file.
+No business logic before full ENV initialization.
+Fail-fast on invalid configuration.
+"""
+
 import os
 import sys
+from typing import Optional
 
-# Импортируем бизнес-константы из constants.py
+# ====================================================================================
+# ENVIRONMENT CONFIGURATION (MUST BE FIRST)
+# ====================================================================================
+# ENVIRONMENT is required and must be one of: dev, staging, production
+# Default: "production" for Railway deployments
+
+_ENVIRONMENT_RAW = os.getenv("ENVIRONMENT", "production").lower()
+_ALLOWED_ENVIRONMENTS = {"dev", "staging", "production"}
+
+if _ENVIRONMENT_RAW not in _ALLOWED_ENVIRONMENTS:
+    print(
+        f"ERROR: Invalid ENVIRONMENT value: '{_ENVIRONMENT_RAW}'",
+        file=sys.stderr
+    )
+    print(
+        f"ERROR: Allowed values: {', '.join(sorted(_ALLOWED_ENVIRONMENTS))}",
+        file=sys.stderr
+    )
+    sys.exit(1)
+
+ENVIRONMENT: str = _ENVIRONMENT_RAW
+IS_PRODUCTION: bool = ENVIRONMENT == "production"
+IS_STAGING: bool = ENVIRONMENT == "staging"
+IS_DEV: bool = ENVIRONMENT == "dev"
+
+# ====================================================================================
+# REQUIRED ENVIRONMENT VARIABLES (NO DEFAULTS)
+# ====================================================================================
+
+# Telegram Bot Configuration
+BOT_TOKEN: Optional[str] = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    print("ERROR: BOT_TOKEN environment variable is not set!", file=sys.stderr)
+    sys.exit(1)
+
+# Admin Configuration
+ADMIN_TELEGRAM_ID_STR: Optional[str] = os.getenv("ADMIN_TELEGRAM_ID")
+if not ADMIN_TELEGRAM_ID_STR:
+    print("ERROR: ADMIN_TELEGRAM_ID environment variable is not set!", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    ADMIN_TELEGRAM_ID: int = int(ADMIN_TELEGRAM_ID_STR)
+except ValueError:
+    print(
+        f"ERROR: ADMIN_TELEGRAM_ID must be a number, got: {ADMIN_TELEGRAM_ID_STR}",
+        file=sys.stderr
+    )
+    sys.exit(1)
+
+# Database Configuration
+DATABASE_URL: Optional[str] = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("ERROR: DATABASE_URL environment variable is not set!", file=sys.stderr)
+    sys.exit(1)
+
+# Redis Configuration
+REDIS_URL: Optional[str] = os.getenv("REDIS_URL")
+if not REDIS_URL:
+    print("ERROR: REDIS_URL environment variable is not set!", file=sys.stderr)
+    print("ERROR: Redis is required for production deployment (FSM state storage)", file=sys.stderr)
+    sys.exit(1)
+
+# ====================================================================================
+# OPTIONAL ENVIRONMENT VARIABLES (WITH SAFE DEFAULTS)
+# ====================================================================================
+
+# Support Configuration
+SUPPORT_EMAIL: str = os.getenv("SUPPORT_EMAIL", "support@example.com")
+SUPPORT_TELEGRAM: str = os.getenv("SUPPORT_TELEGRAM", "@support")
+
+# Telegram Payments Configuration
+TG_PROVIDER_TOKEN: str = os.getenv("TG_PROVIDER_TOKEN", "")
+
+# Xray Core API Configuration (OPTIONAL)
+XRAY_API_URL: str = os.getenv("XRAY_API_URL", "")
+XRAY_API_KEY: str = os.getenv("XRAY_API_KEY", "")
+
+# Xray VLESS REALITY Server Configuration
+XRAY_SERVER_IP: str = os.getenv("XRAY_SERVER_IP", "172.86.67.9")
+XRAY_PORT: int = int(os.getenv("XRAY_PORT", "443"))
+XRAY_SNI: str = os.getenv("XRAY_SNI", "www.cloudflare.com")
+XRAY_FP: str = os.getenv("XRAY_FP", "ios")  # Default: ios for REALITY protocol
+
+# Xray Security Keys (REQUIRED in production, optional in dev)
+_XRAY_PUBLIC_KEY_RAW: Optional[str] = os.getenv("XRAY_PUBLIC_KEY")
+_XRAY_SHORT_ID_RAW: Optional[str] = os.getenv("XRAY_SHORT_ID")
+
+# Crypto Bot Configuration
+CRYPTOBOT_TOKEN: str = os.getenv("CRYPTOBOT_TOKEN", "")
+CRYPTOBOT_API_URL: str = os.getenv("CRYPTOBOT_API_URL", "https://pay.crypt.bot/api")
+CRYPTOBOT_WEBHOOK_SECRET: str = os.getenv("CRYPTOBOT_WEBHOOK_SECRET", "")
+
+# Health Server Configuration
+HEALTH_SERVER_HOST: str = os.getenv("HEALTH_SERVER_HOST", "0.0.0.0")
+HEALTH_SERVER_PORT: int = int(os.getenv("HEALTH_SERVER_PORT", "8080"))
+
+# ====================================================================================
+# BUSINESS LOGIC (AFTER FULL ENV INITIALIZATION)
+# ====================================================================================
+
+# Import business constants (safe - no config dependencies)
 from constants import (
     TARIFFS,
     BALANCE_TOPUP_AMOUNTS,
     SBP_DETAILS,
 )
 
-# Telegram Bot Token (получить у @BotFather)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    print("ERROR: BOT_TOKEN environment variable is not set!", file=sys.stderr)
-    sys.exit(1)
+# VPN Keys File (DEPRECATED - keys are created via Xray API)
+VPN_KEYS_FILE: str = "vpn_keys.txt"
 
-# Telegram ID администратора (можно узнать у @userinfobot)
-ADMIN_TELEGRAM_ID_STR = os.getenv("ADMIN_TELEGRAM_ID")
-if not ADMIN_TELEGRAM_ID_STR:
-    print("ERROR: ADMIN_TELEGRAM_ID environment variable is not set!", file=sys.stderr)
-    sys.exit(1)
+# VPN API Availability Flag
+VPN_ENABLED: bool = bool(XRAY_API_URL and XRAY_API_KEY)
 
-try:
-    ADMIN_TELEGRAM_ID = int(ADMIN_TELEGRAM_ID_STR)
-except ValueError:
-    print(f"ERROR: ADMIN_TELEGRAM_ID must be a number, got: {ADMIN_TELEGRAM_ID_STR}", file=sys.stderr)
-    sys.exit(1)
+# Xray Security Keys Validation (production requires explicit values)
+if IS_PRODUCTION or IS_STAGING:
+    if not _XRAY_PUBLIC_KEY_RAW or not _XRAY_SHORT_ID_RAW:
+        print(
+            "ERROR: XRAY_PUBLIC_KEY and XRAY_SHORT_ID must be set in production/staging!",
+            file=sys.stderr
+        )
+        print(
+            "ERROR: Set ENVIRONMENT=dev for development mode with default values",
+            file=sys.stderr
+        )
+        sys.exit(1)
+    XRAY_PUBLIC_KEY: str = _XRAY_PUBLIC_KEY_RAW
+    XRAY_SHORT_ID: str = _XRAY_SHORT_ID_RAW
+elif IS_DEV:
+    # Dev mode: use safe defaults if not provided
+    XRAY_PUBLIC_KEY: str = _XRAY_PUBLIC_KEY_RAW or "fDixPEehAKSEsRGm5Q9HY-BNs9uMmN5NIzEDKngDOk8"
+    XRAY_SHORT_ID: str = _XRAY_SHORT_ID_RAW or "a1b2c3d4"
+else:
+    # Fallback (should never happen due to validation above)
+    XRAY_PUBLIC_KEY: str = _XRAY_PUBLIC_KEY_RAW or ""
+    XRAY_SHORT_ID: str = _XRAY_SHORT_ID_RAW or ""
 
-# Поддержка (можно переопределить через env переменные)
-SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "support@example.com")
-SUPPORT_TELEGRAM = os.getenv("SUPPORT_TELEGRAM", "@support")
+# ====================================================================================
+# VALIDATION & STARTUP MESSAGES
+# ====================================================================================
 
-# Файл с VPN-ключами (DEPRECATED - больше не используется, ключи создаются через Xray API)
-VPN_KEYS_FILE = "vpn_keys.txt"
+# Log environment configuration
+if IS_PRODUCTION:
+    print("INFO: Running in PRODUCTION mode", file=sys.stderr)
+elif IS_STAGING:
+    print("INFO: Running in STAGING mode", file=sys.stderr)
+else:
+    print("INFO: Running in DEV mode", file=sys.stderr)
 
-# Telegram Payments provider token (получить через BotFather после подключения ЮKassa)
-TG_PROVIDER_TOKEN = os.getenv("TG_PROVIDER_TOKEN", "")
-
-# Xray Core API Configuration (OPTIONAL - бот работает без VPN API, но VPN-операции блокируются)
-XRAY_API_URL = os.getenv("XRAY_API_URL", "")
-XRAY_API_KEY = os.getenv("XRAY_API_KEY", "")
-
-# Флаг доступности VPN API
-VPN_ENABLED = bool(XRAY_API_URL and XRAY_API_KEY)
-
+# VPN API Status
 if not VPN_ENABLED:
     print("WARNING: XRAY_API_URL or XRAY_API_KEY is not set!", file=sys.stderr)
-    print("WARNING: VPN operations will be BLOCKED until XRAY_API_URL and XRAY_API_KEY are configured", file=sys.stderr)
-    print("WARNING: Bot will continue running, but subscriptions cannot be activated", file=sys.stderr)
+    print(
+        "WARNING: VPN operations will be BLOCKED until XRAY_API_URL and XRAY_API_KEY are configured",
+        file=sys.stderr
+    )
+    print(
+        "WARNING: Bot will continue running, but subscriptions cannot be activated",
+        file=sys.stderr
+    )
 else:
     print("INFO: VPN API configured successfully (VLESS + REALITY)", file=sys.stderr)
-
-# Xray VLESS REALITY Server Constants (REQUIRED)
-# Эти параметры используются для генерации VLESS ссылок
-XRAY_SERVER_IP = os.getenv("XRAY_SERVER_IP", "172.86.67.9")
-XRAY_PORT = int(os.getenv("XRAY_PORT", "443"))
-XRAY_SNI = os.getenv("XRAY_SNI", "www.cloudflare.com")
-
-# XRAY_PUBLIC_KEY и XRAY_SHORT_ID - критичные параметры безопасности
-# В production НЕ используем дефолтные значения для безопасности
-if ENVIRONMENT == "dev":
-    # Для dev окружения разрешаем дефолтные значения (для разработки)
-    XRAY_PUBLIC_KEY = os.getenv("XRAY_PUBLIC_KEY", "fDixPEehAKSEsRGm5Q9HY-BNs9uMmN5NIzEDKngDOk8")
-    XRAY_SHORT_ID = os.getenv("XRAY_SHORT_ID", "a1b2c3d4")
-else:
-    # В production требуется явное указание через env переменные
-    XRAY_PUBLIC_KEY = os.getenv("XRAY_PUBLIC_KEY")
-    XRAY_SHORT_ID = os.getenv("XRAY_SHORT_ID")
-    if not XRAY_PUBLIC_KEY or not XRAY_SHORT_ID:
-        print("ERROR: XRAY_PUBLIC_KEY and XRAY_SHORT_ID must be set in production!", file=sys.stderr)
-        print("ERROR: Set ENVIRONMENT=dev for development mode with default values", file=sys.stderr)
-        sys.exit(1)
-# XRAY_FLOW удалён: параметр flow ЗАПРЕЩЁН для REALITY протокола
-# VLESS с REALITY не использует flow параметр
-XRAY_FP = os.getenv("XRAY_FP", "ios")  # По умолчанию ios согласно требованиям
-
-# Environment detection (для проверки production режима)
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
-IS_PRODUCTION = ENVIRONMENT != "dev"
-
-# Crypto Bot (Telegram Crypto Pay) Configuration
-CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")
-CRYPTOBOT_API_URL = os.getenv("CRYPTOBOT_API_URL", "https://pay.crypt.bot/api")
-CRYPTOBOT_WEBHOOK_SECRET = os.getenv("CRYPTOBOT_WEBHOOK_SECRET", "")
-
-
-# Redis Configuration (REQUIRED)
-REDIS_URL = os.getenv("REDIS_URL")
-if not REDIS_URL:
-    print("ERROR: REDIS_URL environment variable is not set!", file=sys.stderr)
-    print("ERROR: Redis is required for production deployment (FSM state storage)", file=sys.stderr)
-    sys.exit(1)
