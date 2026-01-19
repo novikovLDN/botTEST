@@ -58,7 +58,6 @@ XRAY_SNI = os.getenv("XRAY_SNI", "www.cloudflare.com")
 
 # XRAY_PUBLIC_KEY и XRAY_SHORT_ID - критичные параметры безопасности
 # В production НЕ используем дефолтные значения для безопасности
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 if ENVIRONMENT == "dev":
     # Для dev окружения разрешаем дефолтные значения (для разработки)
     XRAY_PUBLIC_KEY = os.getenv("XRAY_PUBLIC_KEY", "fDixPEehAKSEsRGm5Q9HY-BNs9uMmN5NIzEDKngDOk8")
@@ -74,6 +73,10 @@ else:
 # XRAY_FLOW удалён: параметр flow ЗАПРЕЩЁН для REALITY протокола
 # VLESS с REALITY не использует flow параметр
 XRAY_FP = os.getenv("XRAY_FP", "ios")  # По умолчанию ios согласно требованиям
+
+# Environment detection (для проверки production режима)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
+IS_PRODUCTION = ENVIRONMENT != "dev"
 
 # Crypto Bot (Telegram Crypto Pay) Configuration
 CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN", "")

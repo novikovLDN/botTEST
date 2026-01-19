@@ -5,11 +5,31 @@ from typing import Tuple, List
 from aiogram import Bot
 import database
 import config
+import redis_client
 
 logger = logging.getLogger(__name__)
 
 # Минимальное количество свободных VPN-ключей больше не используется
 # VPN-ключи создаются динамически через Xray API (VLESS + REALITY)
+
+
+async def check_redis_connection() -> Tuple[bool, str]:
+    """Проверить подключение к Redis
+    
+    Returns:
+        Кортеж (is_ok, message) - статус проверки и сообщение
+    """
+    try:
+        # Проверяем подключение к Redis
+        client = await redis_client.get_redis_client()
+        if client is None:
+            # Пытаемся создать клиент, если его нет
+            await redis_client.check_redis_connection()
+        else:
+            await client.ping()
+        return True, "Redis подключение: OK"
+    except Exception as e:
+        return False, f"Redis подключение: Ошибка ({str(e)})"
 
 
 async def check_database_connection() -> Tuple[bool, str]:
@@ -80,6 +100,12 @@ async def perform_health_check() -> Tuple[bool, list]:
     """
     messages = []
     all_ok = True
+    
+    # Проверка Redis (критично! - FSM storage)
+    redis_ok, redis_msg = await check_redis_connection()
+    messages.append(redis_msg)
+    if not redis_ok:
+        all_ok = False
     
     # Проверка статуса инициализации БД (критично!)
     if database.DB_INIT_STATUS != database.DBInitStatus.READY:

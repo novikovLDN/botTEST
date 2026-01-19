@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import os
+import sys
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 import config
 import database
+import redis_client
 import handlers
 import reminders
 import healthcheck
@@ -24,63 +26,97 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
+    """
+    Main startup sequence:
+    1. Validate environment variables (config.py)
+    2. Connect Redis (fail-fast if unavailable)
+    3. Connect Database
+    4. Run migrations (fail-fast if failed)
+    5. Start polling
+    """
+    # ====================================================================================
+    # STEP 1: Validate Environment Variables
+    # ====================================================================================
     # Конфигурация уже проверена в config.py
     # Если переменные окружения не заданы, программа завершится с ошибкой
+    logger.info("✅ Environment variables validated")
     
-    # Инициализация бота и диспетчера
-    bot = Bot(token=config.BOT_TOKEN)
-    
-    # Configure Storage (Redis or Memory)
-    if config.REDIS_URL:
-        try:
-            from aiogram.fsm.storage.redis import RedisStorage
-            storage = RedisStorage.from_url(config.REDIS_URL)
-            logger.info(f"Using Redis Storage at {config.REDIS_URL}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Redis storage: {e}. Falling back to MemoryStorage.")
-            storage = MemoryStorage()
-    else:
-        logger.warning("REDIS_URL not set. Using MemoryStorage (NOT RECOMMENDED for production).")
-        storage = MemoryStorage()
+    # ====================================================================================
+    # STEP 2: Connect Redis (FAIL-FAST)
+    # ====================================================================================
+    # Redis is REQUIRED - no fallback to MemoryStorage in production
+    logger.info("🔌 Connecting to Redis...")
+    try:
+        # Проверяем подключение к Redis перед созданием storage
+        await redis_client.check_redis_connection()
         
+        # Создаём Redis storage для FSM
+        storage = RedisStorage.from_url(config.REDIS_URL)
+        logger.info(f"✅ Redis Storage initialized at {config.REDIS_URL}")
+    except Exception as e:
+        error_msg = (
+            f"❌ CRITICAL: Cannot connect to Redis!\n"
+            f"Error: {type(e).__name__}: {e}\n"
+            f"Redis is REQUIRED for FSM state storage.\n"
+            f"Application will NOT start without Redis."
+        )
+        logger.error(error_msg)
+        
+        # В production режиме запрещаем запуск без Redis
+        if config.IS_PRODUCTION:
+            logger.error("Production mode: Redis is mandatory. Exiting.")
+            sys.exit(1)
+        else:
+            # В dev режиме разрешаем MemoryStorage с предупреждением
+            logger.warning("Dev mode: Falling back to MemoryStorage (NOT for production!)")
+            from aiogram.fsm.storage.memory import MemoryStorage
+            storage = MemoryStorage()
+    
+    # ====================================================================================
+    # STEP 3: Initialize Bot and Dispatcher
+    # ====================================================================================
+    bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher(storage=storage)
     
     # Регистрация handlers
     dp.include_router(handlers.router)
     
     # ====================================================================================
-    # SAFE STARTUP GUARD: Инициализация базы данных с защитой от краша
+    # STEP 4: Connect Database and Run Migrations (FAIL-FAST)
     # ====================================================================================
-    # Бот должен ВСЕГДА запускаться, даже если БД недоступна.
-    # В случае ошибки бот работает в деградированном режиме.
-    # ====================================================================================
+    
+    logger.info("🔌 Connecting to Database...")
     # Сбрасываем флаги уведомлений при старте (чтобы уведомления отправлялись при каждом старте)
     admin_notifications.reset_notification_flags()
     
     try:
         success = await database.init_db()
         if success:
-            logger.info("✅ База данных инициализирована успешно")
+            logger.info("✅ Database initialized successfully")
             database.DB_READY = True
         else:
-            logger.error("❌ DB INIT FAILED — RUNNING IN DEGRADED MODE")
-            database.DB_READY = False
-            # Уведомляем администратора о деградированном режиме
-            try:
-                await admin_notifications.notify_admin_degraded_mode(bot)
-            except Exception as e:
-                logger.error(f"Failed to send degraded mode notification: {e}")
+            error_msg = (
+                f"❌ CRITICAL: Database initialization failed!\n"
+                f"DB_INIT_STATUS: {database.DB_INIT_STATUS.value}\n"
+                f"Migrations may not be applied.\n"
+                f"Application will NOT start without successful DB initialization."
+            )
+            logger.error(error_msg)
+            raise RuntimeError(f"Database initialization failed: {database.DB_INIT_STATUS.value}")
     except Exception as e:
-        # КРИТИЧЕСКИ ВАЖНО: Не пробрасываем исключение, не останавливаем процесс
-        logger.exception("❌ DB INIT FAILED — RUNNING IN DEGRADED MODE")
+        # FAIL-FAST: Не продолжаем запуск при ошибке БД
+        logger.exception("❌ CRITICAL: Database initialization error")
         logger.error(f"Database initialization error: {type(e).__name__}: {e}")
         database.DB_READY = False
-        # Уведомляем администратора о деградированном режиме
+        
+        # Уведомляем администратора о критической ошибке
         try:
             await admin_notifications.notify_admin_degraded_mode(bot)
         except Exception as e:
-            logger.error(f"Failed to send degraded mode notification: {e}")
-        # Продолжаем запуск бота в деградированном режиме
+            logger.error(f"Failed to send critical error notification: {e}")
+        
+        # Завершаем процесс с ошибкой
+        raise RuntimeError(f"Database initialization failed: {e}") from e
     
     # Запуск фоновой задачи для напоминаний (только если БД готова)
     reminder_task = None
@@ -116,113 +152,9 @@ async def main():
     logger.info(f"Health check HTTP server started on http://{health_server_host}:{health_server_port}/health")
     
     # ====================================================================================
-    # SAFE STARTUP GUARD: Фоновая задача повторной инициализации БД
+    # Background Tasks Setup
     # ====================================================================================
-    # Пытается восстановить соединение с БД каждые 30 секунд
-    # ====================================================================================
-    # Переменные для отслеживания восстановленных задач (для db_retry_task)
-    recovered_tasks = {
-        "reminder": None,
-        "fast_cleanup": None,
-        "auto_renewal": None
-    }
-    
-    async def retry_db_init():
-        """
-        Фоновая задача для автоматической повторной инициализации БД
-        
-        Требования:
-        - Запускается только если DB_READY == False
-        - Проверяет доступность БД каждые 30 секунд
-        - При успешной инициализации:
-          - устанавливает DB_READY = True
-          - логирует восстановление
-          - завершает цикл (break)
-        - Никогда не падает (все исключения обрабатываются)
-        - Не блокирует главный event loop
-        """
-        nonlocal reminder_task, fast_cleanup_task, auto_renewal_task, recovered_tasks
-        retry_interval = 30  # секунд
-        
-        # Если БД уже готова, задача не запускается
-        if database.DB_READY:
-            logger.info("Database already ready, retry task not needed")
-            return
-        
-        logger.info("Starting DB initialization retry task (will retry every 30 seconds)")
-        
-        while True:
-            try:
-                # Ждём интервал перед следующей попыткой
-                await asyncio.sleep(retry_interval)
-                
-                # Проверяем, не стала ли БД доступной извне
-                if database.DB_READY:
-                    logger.info("Database became available, stopping retry task")
-                    break
-                
-                # Пытаемся инициализировать БД
-                logger.info("🔄 Retrying database initialization...")
-                try:
-                    success = await database.init_db()
-                    if success:
-                        # Успешная инициализация
-                        database.DB_READY = True
-                        logger.info("✅ DATABASE RECOVERY SUCCESSFUL — RESUMING FULL FUNCTIONALITY")
-                        
-                        # Уведомляем администратора о восстановлении
-                        try:
-                            await admin_notifications.notify_admin_recovered(bot)
-                        except Exception as e:
-                            logger.error(f"Failed to send recovery notification: {e}")
-                        
-                        # Запускаем задачи, которые были пропущены при старте
-                        if reminder_task is None and recovered_tasks["reminder"] is None:
-                            recovered_tasks["reminder"] = asyncio.create_task(reminders.reminders_task(bot))
-                            logger.info("Reminders task started (recovered)")
-                        
-                        if fast_cleanup_task is None and recovered_tasks["fast_cleanup"] is None:
-                            recovered_tasks["fast_cleanup"] = asyncio.create_task(fast_expiry_cleanup.fast_expiry_cleanup_task())
-                            logger.info("Fast expiry cleanup task started (recovered)")
-                        
-                        if auto_renewal_task is None and recovered_tasks["auto_renewal"] is None:
-                            recovered_tasks["auto_renewal"] = asyncio.create_task(auto_renewal.auto_renewal_task(bot))
-                            logger.info("Auto-renewal task started (recovered)")
-                        
-                        # Успешно инициализировали БД - выходим из цикла
-                        logger.info("DB retry task completed successfully, stopping retry loop")
-                        break
-                    else:
-                        # Инициализация не удалась, попробуем снова через интервал
-                        logger.warning("Database initialization retry failed, will retry later")
-                        
-                except Exception as e:
-                    # Ошибка при попытке инициализации - логируем, но продолжаем попытки
-                    logger.warning(f"Database initialization retry error: {type(e).__name__}: {e}")
-                    logger.debug("Full retry error details:", exc_info=True)
-                    # Продолжаем цикл для следующей попытки
-                    
-            except asyncio.CancelledError:
-                # Задача отменена (например, при остановке бота)
-                logger.info("DB retry task cancelled")
-                break
-            except Exception as e:
-                # Неожиданная ошибка в самом цикле - логируем и продолжаем
-                logger.exception(f"Unexpected error in DB retry task: {e}")
-                # Продолжаем работу даже при ошибках
-                await asyncio.sleep(retry_interval)
-        
-        logger.info("DB retry task finished")
-    
-    # ====================================================================================
-    # Запуск фоновой задачи повторной инициализации БД (только если БД не готова)
-    # ====================================================================================
-    db_retry_task_instance = None
-    if not database.DB_READY:
-        db_retry_task_instance = asyncio.create_task(retry_db_init())
-        logger.info("DB retry task started (will retry every 30 seconds until DB is ready)")
-    else:
-        logger.info("Database already ready, skipping retry task")
+    # Все задачи запускаются только после успешной инициализации БД (fail-fast гарантирует это)
     
     # Outline cleanup task DISABLED - мигрировали на Xray Core (VLESS)
     # Старая задача outline_cleanup больше не используется
@@ -259,10 +191,10 @@ async def main():
     else:
         logger.warning("Crypto payment watcher task skipped (DB not ready)")
     
-    # Запуск бота
     # ====================================================================================
-    # FAIL-FAST GUARD: Запрещаем запуск polling, если миграции не применены
+    # STEP 5: Start Polling (FAIL-FAST GUARD)
     # ====================================================================================
+    # Запрещаем запуск polling, если миграции не применены
     if database.DB_INIT_STATUS != database.DBInitStatus.READY:
         error_msg = (
             f"❌ CRITICAL: Cannot start bot polling - DB migrations not applied!\n"
@@ -279,86 +211,58 @@ async def main():
         # Завершаем процесс с ошибкой
         raise RuntimeError(f"Database migrations not applied: {database.DB_INIT_STATUS.value}")
     
-    if database.DB_READY:
-        logger.info("✅ Бот запущен в полнофункциональном режиме")
-    else:
-        logger.warning("⚠️ Бот запущен в ДЕГРАДИРОВАННОМ режиме (БД недоступна)")
+    logger.info("✅ Bot starting in full functionality mode")
+    logger.info("🚀 Starting bot polling...")
+    
     try:
         await dp.start_polling(bot)
     finally:
-        # Отменяем все фоновые задачи
-        if db_retry_task_instance:
-            db_retry_task_instance.cancel()
+        # ====================================================================================
+        # Cleanup: Отменяем все фоновые задачи
+        # ====================================================================================
+        logger.info("Shutting down...")
+        
         if reminder_task:
             reminder_task.cancel()
-        if recovered_tasks.get("reminder"):
-            recovered_tasks["reminder"].cancel()
+        if trial_notifications_task:
+            trial_notifications_task.cancel()
         healthcheck_task.cancel()
         health_server_task.cancel()
         if auto_renewal_task:
             auto_renewal_task.cancel()
-        if recovered_tasks.get("auto_renewal"):
-            recovered_tasks["auto_renewal"].cancel()
         if cleanup_task:
             cleanup_task.cancel()
         if fast_cleanup_task:
             fast_cleanup_task.cancel()
-        if recovered_tasks.get("fast_cleanup"):
-            recovered_tasks["fast_cleanup"].cancel()
+        if crypto_watcher_task:
+            crypto_watcher_task.cancel()
         
         # Ожидаем завершения всех задач
-        if db_retry_task_instance:
-            try:
-                await db_retry_task_instance
-            except asyncio.CancelledError:
-                pass
-        if reminder_task:
-            try:
-                await reminder_task
-            except asyncio.CancelledError:
-                pass
-        if recovered_tasks.get("reminder"):
-            try:
-                await recovered_tasks["reminder"]
-            except asyncio.CancelledError:
-                pass
-        try:
-            await healthcheck_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await health_server_task
-        except asyncio.CancelledError:
-            pass
-        if auto_renewal_task:
-            try:
-                await auto_renewal_task
-            except asyncio.CancelledError:
-                pass
-        if recovered_tasks.get("auto_renewal"):
-            try:
-                await recovered_tasks["auto_renewal"]
-            except asyncio.CancelledError:
-                pass
-        if cleanup_task:
-            try:
-                await cleanup_task
-            except asyncio.CancelledError:
-                pass
-        if fast_cleanup_task:
-            try:
-                await fast_cleanup_task
-            except asyncio.CancelledError:
-                pass
-        if recovered_tasks.get("fast_cleanup"):
-            try:
-                await recovered_tasks["fast_cleanup"]
-            except asyncio.CancelledError:
-                pass
+        tasks_to_wait = [
+            reminder_task,
+            trial_notifications_task,
+            healthcheck_task,
+            health_server_task,
+            auto_renewal_task,
+            cleanup_task,
+            fast_cleanup_task,
+            crypto_watcher_task,
+        ]
+        
+        for task in tasks_to_wait:
+            if task:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         
         # Закрываем пул соединений к БД
         await database.close_pool()
         logger.info("Database connection pool closed")
+        
+        # Закрываем Redis клиент
+        await redis_client.close_redis_client()
+        logger.info("Redis client closed")
 
 
 if __name__ == "__main__":

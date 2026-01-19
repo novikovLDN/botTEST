@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from aiohttp import web
 from aiogram import Bot
 import database
+import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +38,16 @@ async def health_handler(request: web.Request) -> web.Response:
     It only reads the global DB_READY and DB_INIT_STATUS flags.
     """
     try:
-        # Читаем глобальные флаги (не обращаемся к БД)
+        # Читаем глобальные флаги (не обращаемся к БД/Redis синхронно)
         db_ready = database.DB_READY
         db_init_status = database.DB_INIT_STATUS
+        redis_ok = redis_client.REDIS_READY
         
-        # Определяем статус: FAIL если миграции не применены
-        if db_init_status != database.DBInitStatus.READY:
+        # Определяем статус: FAIL если Redis недоступен или миграции не применены
+        if not redis_ok:
+            status = "fail"
+            http_status = 503  # Service Unavailable
+        elif db_init_status != database.DBInitStatus.READY:
             status = "fail"
             http_status = 503  # Service Unavailable
         elif db_ready:
@@ -55,12 +60,13 @@ async def health_handler(request: web.Request) -> web.Response:
         # Формируем ответ
         response_data: Dict[str, Any] = {
             "status": status,
+            "redis_ready": redis_ok,
             "db_ready": db_ready,
             "db_init_status": db_init_status.value,
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }
         
-        # HTTP статус код: 503 если миграции не применены, иначе 200
+        # HTTP статус код: 503 если Redis недоступен или миграции не применены, иначе 200
         return web.json_response(response_data, status=http_status)
         
     except Exception as e:
@@ -69,6 +75,7 @@ async def health_handler(request: web.Request) -> web.Response:
         # Возвращаем fail статус при ошибке
         response_data = {
             "status": "fail",
+            "redis_ready": False,
             "db_ready": False,
             "db_init_status": "UNKNOWN",
             "timestamp": datetime.utcnow().isoformat() + "Z",
