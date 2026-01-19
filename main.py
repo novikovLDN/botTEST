@@ -83,10 +83,7 @@ async def main():
     # В aiogram 3.x handlers обрабатываются в порядке их регистрации
     logger.info("📋 Registering handlers...")
     dp.include_router(handlers.router)
-    
-    # Логируем количество зарегистрированных handlers для диагностики
-    total_handlers = len(handlers.router.handlers)
-    logger.info(f"✅ Handlers registered: {total_handlers} total handlers in main router")
+    logger.info("✅ Handlers registered successfully")
     
     # ====================================================================================
     # STEP 4: Connect Database and Run Migrations (FAIL-FAST)
