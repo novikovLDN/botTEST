@@ -7,22 +7,9 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'payment';
 
 -- Make vpn_key nullable (for Xray Core migration)
--- Используем DO $$ блок для идемпотентности (требуется для ALTER COLUMN DROP NOT NULL)
--- Enterprise standard: все IF конструкции должны быть внутри DO $$ BEGIN ... END $$ блоков
-DO $$
-BEGIN
-    -- Проверяем существование колонки и её NOT NULL constraint
-    IF EXISTS (
-        SELECT 1 
-        FROM information_schema.columns 
-        WHERE table_schema = 'public'
-          AND table_name = 'subscriptions' 
-          AND column_name = 'vpn_key' 
-          AND is_nullable = 'NO'
-    ) THEN
-        ALTER TABLE subscriptions ALTER COLUMN vpn_key DROP NOT NULL;
-    END IF;
-END $$;
+-- Note: vpn_key is already nullable in migration 001, so DROP NOT NULL is safe
+-- This operation is idempotent: DROP NOT NULL on nullable column is a no-op
+ALTER TABLE subscriptions ALTER COLUMN vpn_key DROP NOT NULL;
 
 -- Auto-renewal fields
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_auto_renewal_at TIMESTAMP;
