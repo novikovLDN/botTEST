@@ -148,6 +148,9 @@ async def callback_language(callback: CallbackQuery):
     - Обновляет сообщение с главным меню
     - Вызывает callback.answer() для мгновенного отклика
     """
+    # ДИАГНОСТИКА: Логируем, что handler вызван
+    logger.info(f"✅ callback_language handler MATCHED: callback_data='{callback.data}'")
+    
     # Отвечаем сразу для мгновенного отклика UI
     await callback.answer()
     
@@ -188,6 +191,9 @@ async def callback_main_menu(callback: CallbackQuery):
     - Показывает главное меню с актуальным языком
     - Вызывает callback.answer() для мгновенного отклика
     """
+    # ДИАГНОСТИКА: Логируем, что handler вызван
+    logger.info(f"✅ callback_main_menu handler MATCHED: callback_data='{callback.data}'")
+    
     # Отвечаем сразу для мгновенного отклика UI
     await callback.answer()
     

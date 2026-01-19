@@ -136,6 +136,9 @@ async def callback_admin_main(callback: CallbackQuery):
     - Показывает админ-дашборд
     - Вызывает callback.answer() для мгновенного отклика
     """
+    # ДИАГНОСТИКА: Логируем, что handler вызван
+    logger.info(f"✅ callback_admin_main handler MATCHED: callback_data='{callback.data}'")
+    
     # Отвечаем сразу для мгновенного отклика UI
     await callback.answer()
     

@@ -31,13 +31,16 @@ from handlers.admin import router as admin_router
 from handlers.payments import router as payments_router
 
 # Регистрируем подроутеры в правильном порядке
-# ВАЖНО: Порядок регистрации определяет порядок обработки handlers
-# Более специфичные handlers должны быть зарегистрированы первыми
+# КРИТИЧНО: В aiogram 3.x порядок регистрации handlers определяет порядок их обработки
+# Более специфичные handlers должны быть зарегистрированы ПЕРВЫМИ
 # 
 # В aiogram 3.x при include_router:
 # 1. Handlers из подроутера добавляются в конец списка handlers основного роутера
 # 2. Порядок обработки: handlers из первого include_router → handlers из второго → ...
-# 3. Fallback handler должен быть зарегистрирован ПОСЛЕ всех include_router
+# 3. Fallback handler ДОЛЖЕН быть зарегистрирован ПОСЛЕ всех include_router
+# 
+# ВАЖНО: Порядок регистрации критически важен для правильной работы фильтров
+# Если fallback handler регистрируется ДО конкретных handlers, он перехватит все callback_query
 router.include_router(user_router)
 router.include_router(admin_router)
 router.include_router(payments_router)
